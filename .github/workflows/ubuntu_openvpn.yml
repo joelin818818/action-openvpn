@@ -135,19 +135,16 @@ jobs:
           # 无限循环进行网络检查
           while true; do
             echo "[Network Check] --- 外部检查开始 $(date) ---"
-            TARGET_URL="https://www.google.com" # 检查外部连通性的目标 URL
-            # 使用 --fail 选项：如果 HTTP 状态码非 2xx 或发生连接错误，curl 将以非零退出码退出
-            # 由于设置了 set -e，curl 失败将导致本脚本在此处立即终止
+            TARGET_URL="https://www.google.com"
             if curl -sSL --fail --max-time 10 --connect-timeout 5 -o /dev/null "${TARGET_URL}"; then
-              echo "[Network Check] ✓ ${TARGET_URL} 连接成功。" # 检查成功
+              echo "[Network Check] ✓ ${TARGET_URL} 连接成功。"
             else
-              # curl 失败时的日志信息
               STATUS_CODE=$(curl -sSL --max-time 10 --connect-timeout 5 -o /dev/null -w "%{http_code}" "${TARGET_URL}" || echo "N/A")
               echo "[Network Check] ✗ ${TARGET_URL} 连接失败或异常响应 (状态码: ${STATUS_CODE})。本任务将退出。"
-              exit 1 # 显式退出，触发 set -e 和 trap
+              exit 1
             fi
             echo "[Network Check] --- 外部检查结束 $(date) ---"
-            sleep 60 # 等待 1 分钟进行下一次检查
+            sleep 20 # 等待 20 秒进行下一次检查
           done
           # 这是一个无限循环，正常情况下不会执行到这里，除非脚本因错误退出
 
