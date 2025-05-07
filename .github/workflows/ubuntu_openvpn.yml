@@ -135,7 +135,7 @@ jobs:
           # 无限循环进行网络检查
           while true; do
             echo "[Network Check] --- 外部检查开始 $(date) ---"
-            TARGET_URL="https://www.google.com"
+            TARGET_URL="http://192.168.1.254"
             if curl -sSL --fail --max-time 10 --connect-timeout 5 -o /dev/null "${TARGET_URL}"; then
               echo "[Network Check] ✓ ${TARGET_URL} 连接成功。"
             else
