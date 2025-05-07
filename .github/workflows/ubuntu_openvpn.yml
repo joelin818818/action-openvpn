@@ -83,6 +83,7 @@ jobs:
           # --- 验证出口IP国家循环 ---
           VERIFY_TIMEOUT_SECONDS=300 # 验证出口IP的总超时时间 (例如 5 分钟)
           CHECK_INTERVAL_SECONDS=5 # 每次验证检查的间隔时间 (例如 5 秒)
+          SECONDS=0 # <--- 新增，重置计时
           END_VERIFY_TIME=$((SECONDS + VERIFY_TIMEOUT_SECONDS))
           TARGET_COUNTRY_CODE="CN" # <--- 您期望的出口国家代码
           # 获取出口IP国家的服务 URL
