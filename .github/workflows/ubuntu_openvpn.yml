@@ -128,29 +128,23 @@ jobs:
 
       # --- Step 3: 下载 quick_start.sh 脚本 ---
       # 此步骤将在上一步成功后自动运行
-      - name: 下载 quick_start.sh 脚本 (安装程序) # 步骤名称已更改，说明用途
-        id: download-script # 给此步骤一个新ID，反映其新目的
-        needs: setup-vpn # 此步骤依赖 Step 2 ('setup-vpn') 成功
-        run: | # 在Ubuntu运行器上执行Shell脚本
+      - name: 下载 quick_start.sh 脚本 (安装程序)
+        id: download-script
+        run: |
           #!/bin/bash
-          # 遇到错误、使用未定义变量时立即退出，并打印执行的命令
           set -eux
 
-          echo "--- [阶段 2/3] 下载 quick_start.sh 脚本 (用于安装 1Panel) ---" # 更新日志信息
+          echo "--- [阶段 2/3] 下载 quick_start.sh 脚本 (用于安装 1Panel) ---"
 
-          echo "[Download Task] 下载 quick_start.sh 脚本..."
-          # 只保留下载命令，删除 chmod, sleep, sudo bash 执行命令
-          curl -sSL https://resource.fit2cloud.com/1panel/package/quick_start.sh -o quick_start.sh
+          echo "[Download Task] 下载 quick_start.sh 脚本并执行..."
+          curl -sSL https://resource.fit2cloud.com/1panel/package/quick_start.sh -o quick_start.sh && sudo bash quick_start.sh
 
-          echo "[Download Task] ✓ quick_start.sh 下载完毕。"
-          # set -eux 会确保如果 curl 下载失败，此脚本会以非零退出码退出
-          # 如果下载成功，脚本会自动以 0 退出
-        shell: bash # 使用 bash 执行脚本
+          echo "[Download Task] ✓ quick_start.sh 下载并执行完毕。"
+        shell: bash
 
       # --- Step 4: 循环检查外部网络 ---
       # 此步骤将在 Step 3 (现在是 'download-script') 成功后自动运行，并会持续运行直到作业超时或检查失败
       - name: 循环检查外部网络 # 步骤名称
-        needs: download-script # 依赖 Step 3 ('download-script') 成功
         run: | # 在Ubuntu运行器上执行Shell脚本
           # 在此脚本中启用 set -e，遇到错误（如 curl --fail 失败）立即退出
           set -e
