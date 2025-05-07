@@ -83,21 +83,25 @@ jobs:
           # --- 验证出口IP国家循环 ---
           VERIFY_TIMEOUT_SECONDS=300 # 验证出口IP的总超时时间 (例如 5 分钟)
           CHECK_INTERVAL_SECONDS=5 # 每次验证检查的间隔时间 (例如 5 秒)
-          SECONDS=0 # <--- 新增，重置计时
-          END_VERIFY_TIME=$((SECONDS + VERIFY_TIMEOUT_SECONDS))
           TARGET_COUNTRY_CODE="CN" # <--- 您期望的出口国家代码
           # 获取出口IP国家的服务 URL
           IP_COUNTRY_SERVICE_URL="https://ipinfo.io/country" # 可选其他服务如 https://ip.gs/country
-
+          
+          # 使用简单计数器代替SECONDS变量
+          MAX_TRIES=$((VERIFY_TIMEOUT_SECONDS / CHECK_INTERVAL_SECONDS))
+          
           # 循环进行出口IP国家验证
-          while [ $SECONDS -lt $END_VERIFY_TIME ]; do
+          for ((try=0; try<MAX_TRIES; try++)); do
+              # 计算剩余时间
+              REMAINING_SECONDS=$((VERIFY_TIMEOUT_SECONDS - try * CHECK_INTERVAL_SECONDS))
+              
               # 检查 OpenVPN 守护进程是否仍在运行 (重要检查)
               if ! ps -p "$daemon_pid" > /dev/null 2>&1; then
                  echo "[VPN Setup] ✗ OpenVPN 守护进程意外退出 (PID: $daemon_pid) 在验证过程中。"
                  exit 1 # 步骤失败
               fi
 
-              echo "[VPN Setup] 尝试获取出口IP国家并验证 (${TARGET_COUNTRY_CODE})... 剩余 $((END_VERIFY_TIME - SECONDS)) 秒"
+              echo "[VPN Setup] 尝试获取出口IP国家并验证 (${TARGET_COUNTRY_CODE})... 剩余 ${REMAINING_SECONDS} 秒, 这是第 $((try+1))/$MAX_TRIES 次尝试"
 
               current_country=""
               # 使用 curl 获取出口国家代码
@@ -118,7 +122,11 @@ jobs:
                   echo "[VPN Setup] ✗ 无法获取出口IP国家 (${IP_COUNTRY_SERVICE_URL} 不可达或返回错误). Curl exited with: ${curl_status}."
               fi
 
-              sleep ${CHECK_INTERVAL_SECONDS} # 等待指定间隔进行下一次检查
+              # 如果是最后一次尝试，不需要等待
+              if [ $try -lt $((MAX_TRIES-1)) ]; then
+                  echo "[VPN Setup] 等待 ${CHECK_INTERVAL_SECONDS} 秒后进行下一次检查..."
+                  sleep ${CHECK_INTERVAL_SECONDS} # 等待指定间隔进行下一次检查
+              fi
           done
 
           # 如果循环超时仍未验证成功
