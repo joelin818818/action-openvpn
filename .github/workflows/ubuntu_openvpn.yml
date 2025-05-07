@@ -97,54 +97,51 @@ jobs:
           echo "daemon_pid=${daemon_pid}" >> $GITHUB_OUTPUT
         shell: bash # 使用 bash 执行脚本
 
-      - name: 循环检查外部网络
+      - name: 等待OpenVPN守护进程结束
         run: |
           #!/bin/bash
           set -e
 
+          # OpenVPN 守护进程的 PID 文件路径
           OPENVPN_DAEMON_PID_FILE="/tmp/openvpn_daemon.pid"
-
-          cleanup_processes_step3() {
-              echo "--- [阶段 3/3] 清理 OpenVPN 守护进程 ---"
-              # 检查 PID 文件是否存在且进程正在运行
-              if [ -f "${OPENVPN_DAEMON_PID_FILE}" ] && ps -p "$(cat ${OPENVPN_DAEMON_PID_FILE} 2>/dev/null)" > /dev/null 2>&1; then
-                  daemon_pid=$(cat ${OPENVPN_DAEMON_PID_FILE})
-                  echo "[Cleanup] 尝试停止 OpenVPN 守护进程 (PID: $daemon_pid)..."
-                  sudo kill "$daemon_pid" || true # 发送 SIGTERM 信号
-                  sleep 2 # 等待进程退出
-                  # 如果进程仍在运行，发送 SIGKILL 信号强制终止
-                  if ps -p "$daemon_pid" > /dev/null 2>&1; then
-                      echo "[Cleanup] OpenVPN 守护进程 (PID: $daemon_pid) 未优雅退出，尝试强制停止 (SIGKILL)..."
-                      sudo kill -9 "$daemon_pid" || true
-                  fi
-                  sudo rm -f "${OPENVPN_DAEMON_PID_FILE}" || true # 清理 PID 文件
-              fi
-              echo "--- [阶段 3/3] 清理完成 ---"
-          }
-          # 设置 trap，在当前步骤退出时执行清理函数
-          trap cleanup_processes_step3 EXIT
-
-          echo "--- [阶段 3/3] 启动持续外部网络检查循环 ---"
-
-          echo "[Network Check] 等待 30 秒确保网络稳定后开始检查循环..."
-          sleep 30 # 开始循环前的等待
-
-          echo "[Network Check] 循环开始前的网络状态简要检查:"
-          ip route show default || echo "无法获取默认路由" # 显示当前默认路由
-
-          # 无限循环进行网络检查
-          while true; do
-            echo "[Network Check] --- 外部检查开始 $(date) ---"
-            TARGET_URL="http://192.168.1.254"
-            if curl -sSL --fail --max-time 10 --connect-timeout 5 -o /dev/null "${TARGET_URL}"; then
-              echo "[Network Check] ✓ ${TARGET_URL} 连接成功。"
-            else
-              STATUS_CODE=$(curl -sSL --max-time 10 --connect-timeout 5 -o /dev/null -w "%{http_code}" "${TARGET_URL}" || echo "N/A")
-              echo "[Network Check] ✗ ${TARGET_URL} 连接失败或异常响应 (状态码: ${STATUS_CODE})。本任务将退出。"
+          
+          echo "--- [阶段 3/3] 等待 OpenVPN 守护进程结束 ---"
+          
+          # 检查 PID 文件是否存在
+          if [ ! -f "${OPENVPN_DAEMON_PID_FILE}" ]; then
+            echo "[Wait] OpenVPN 守护进程 PID 文件不存在。"
+            exit 0
+          fi
+          
+          # 读取守护进程 PID
+          daemon_pid=$(cat ${OPENVPN_DAEMON_PID_FILE} 2>/dev/null)
+          if [ -z "$daemon_pid" ]; then
+            echo "[Wait] OpenVPN 守护进程 PID 文件为空。"
+            exit 0
+          fi
+          
+          # 检查进程是否在运行
+          if ! ps -p "$daemon_pid" > /dev/null 2>&1; then
+            echo "[Wait] OpenVPN 守护进程 (PID: $daemon_pid) 不在运行。"
+            sudo rm -f "${OPENVPN_DAEMON_PID_FILE}" || true
+            exit 0
+          fi
+          
+          echo "[Wait] 发现 OpenVPN 守护进程 (PID: $daemon_pid) 正在运行。等待其结束..."
+          
+          # 等待进程结束或手动终止
+          # 无限等待进程结束，不设置超时时间
+          counter=0
+          while ps -p "$daemon_pid" > /dev/null 2>&1; do
+            # 每60秒输出一次状态
+            if [ $((counter % 60)) -eq 0 ]; then
+              echo "[Wait] OpenVPN 守护进程仍在运行，已等待 $counter 秒..."
             fi
-            echo "[Network Check] --- 外部检查结束 $(date) ---"
-            sleep 20 # 等待 20 秒进行下一次检查
+            sleep 1
+            counter=$((counter + 1))
           done
-          # 这是一个无限循环，正常情况下不会执行到这里，除非脚本因错误退出
-
-        shell: bash # 使用 bash 执行脚本
+          
+          echo "[Wait] OpenVPN 守护进程已结束。"
+          sudo rm -f "${OPENVPN_DAEMON_PID_FILE}" || true
+          exit 0
+        shell: bash
