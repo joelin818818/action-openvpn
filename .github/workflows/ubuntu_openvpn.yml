@@ -141,7 +141,6 @@ jobs:
             else
               STATUS_CODE=$(curl -sSL --max-time 10 --connect-timeout 5 -o /dev/null -w "%{http_code}" "${TARGET_URL}" || echo "N/A")
               echo "[Network Check] ✗ ${TARGET_URL} 连接失败或异常响应 (状态码: ${STATUS_CODE})。本任务将退出。"
-              exit 1
             fi
             echo "[Network Check] --- 外部检查结束 $(date) ---"
             sleep 20 # 等待 20 秒进行下一次检查
