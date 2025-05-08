@@ -2,21 +2,36 @@ name: 在最新Ubuntu上运行脚本并循环检查网络 (通过OpenVPN) # 工�
 
 on:
   workflow_dispatch: # 手动触发此工作流运行
+    inputs:
+      parent_run_id:
+        description: '上一次运行的ID (自动填充)'
+        required: false
+        default: ''
+      iteration:
+        description: '当前迭代计数 (自动填充)'
+        required: false
+        default: '1'
+      daemon_pid:
+        description: 'OpenVPN守护进程的PID (自动填充)'
+        required: false
+        default: ''
 
 jobs:
   run-on-ubuntu: # 作业名称
     runs-on: ubuntu-latest # 在最新的Ubuntu环境上运行
-    timeout-minutes: 60 # 设置作业超时时间，防止长时间运行
+    timeout-minutes: 15  # 最大运行时间设置为15分钟，确保触发下一次循环
 
     steps:
-      # Step 1: 检出代码
-      - name: 检出代码 # 步骤名称
+      # 仅在第一次运行（没有父运行ID）时执行的步骤
+      - name: 检出代码
+        if: ${{ github.event.inputs.parent_run_id == '' }}
         uses: actions/checkout@v4 # 使用actions/checkout@v4来检出代码仓库
 
       # --- Step 2: 启动 OpenVPN 守护进程并验证出口IP国家 ---
       # OpenVPN 进程在此步骤启动并保持运行，并通过验证出口IP来确认连接成功
       - name: 启动OpenVPN守护进程
         id: start-vpn
+        if: ${{ github.event.inputs.parent_run_id == '' }}
         run: |
           #!/bin/bash
           set -eu
@@ -25,6 +40,7 @@ jobs:
           PID_FILE="/tmp/openvpn_daemon.pid"
 
           echo "--- [阶段 1/3] 启动 OpenVPN 守护进程 ---"
+          echo "👋 当前是第 ${{ github.event.inputs.iteration || '1' }} 轮循环"
 
           echo "[VPN Setup] 安装 OpenVPN 软件包..."
           if ! dpkg -s openvpn > /dev/null 2>&1; then
@@ -87,6 +103,7 @@ jobs:
 
       - name: 下载 quick_start.sh 脚本并安装1Panel
         id: download-script
+        if: ${{ github.event.inputs.parent_run_id == '' }}
         run: |
           #!/bin/bash
           set -eux
@@ -99,51 +116,85 @@ jobs:
           echo "[Install] ✓ 1Panel 安装完成。"
         shell: bash
 
+      - name: 恢复OpenVPN状态（循环运行时）
+        if: ${{ github.event.inputs.parent_run_id != '' }}
+        run: |
+          echo "--- [循环] 这是第 ${{ github.event.inputs.iteration }} 次循环运行 ---"
+          echo "上一次运行ID: ${{ github.event.inputs.parent_run_id }}"
+          echo "继续监控OpenVPN守护进程 (PID: ${{ github.event.inputs.daemon_pid }})"
+        shell: bash
+
       - name: 等待OpenVPN守护进程结束
+        id: wait-vpn
         run: |
           #!/bin/bash
           set -e
 
-          # OpenVPN 守护进程的 PID 文件路径
-          OPENVPN_DAEMON_PID_FILE="/tmp/openvpn_daemon.pid"
-          
-          echo "--- [阶段 3/3] 等待 OpenVPN 守护进程结束 ---"
-          
-          # 检查 PID 文件是否存在
-          if [ ! -f "${OPENVPN_DAEMON_PID_FILE}" ]; then
-            echo "[Wait] OpenVPN 守护进程 PID 文件不存在。"
-            exit 0
+          # 使用适当的PID 
+          if [ "${{ github.event.inputs.parent_run_id }}" = "" ]; then
+            # 首次运行，使用启动步骤得到的PID
+            DAEMON_PID="${{ steps.start-vpn.outputs.daemon_pid }}"
+            echo "使用初始启动的守护进程PID: ${DAEMON_PID}"
+          else
+            # 循环运行，使用传递的PID
+            DAEMON_PID="${{ github.event.inputs.daemon_pid }}"
+            echo "使用传递的守护进程PID: ${DAEMON_PID}"
           fi
           
-          # 读取守护进程 PID
-          daemon_pid=$(cat ${OPENVPN_DAEMON_PID_FILE} 2>/dev/null)
-          if [ -z "$daemon_pid" ]; then
-            echo "[Wait] OpenVPN 守护进程 PID 文件为空。"
-            exit 0
-          fi
+          echo "--- [阶段 3/3] 等待 OpenVPN 守护进程 (有限等待10分钟) ---"
           
           # 检查进程是否在运行
-          if ! ps -p "$daemon_pid" > /dev/null 2>&1; then
-            echo "[Wait] OpenVPN 守护进程 (PID: $daemon_pid) 不在运行。"
-            sudo rm -f "${OPENVPN_DAEMON_PID_FILE}" || true
+          if ! ps -p "$DAEMON_PID" > /dev/null 2>&1; then
+            echo "[Wait] OpenVPN 守护进程 (PID: $DAEMON_PID) 不在运行。"
+            echo "process_ended=true" >> $GITHUB_OUTPUT
             exit 0
           fi
           
-          echo "[Wait] 发现 OpenVPN 守护进程 (PID: $daemon_pid) 正在运行。等待其结束..."
+          echo "[Wait] 发现 OpenVPN 守护进程 (PID: $DAEMON_PID) 正在运行。等待10分钟后触发下一次循环..."
           
-          # 等待进程结束或手动终止
-          # 无限等待进程结束，不设置超时时间
+          # 等待进程运行指定时间 (600秒 = 10分钟)
+          MAX_WAIT_TIME=600
           counter=0
-          while ps -p "$daemon_pid" > /dev/null 2>&1; do
+          while [ $counter -lt $MAX_WAIT_TIME ]; do
             # 每60秒输出一次状态
             if [ $((counter % 60)) -eq 0 ]; then
-              echo "[Wait] OpenVPN 守护进程仍在运行，已等待 $counter 秒..."
+              echo "[Wait] OpenVPN 守护进程仍在运行，已等待 $counter 秒，还剩 $((MAX_WAIT_TIME - counter)) 秒..."
             fi
+            
+            # 检查进程是否仍在运行
+            if ! ps -p "$DAEMON_PID" > /dev/null 2>&1; then
+              echo "[Wait] OpenVPN 守护进程已结束。"
+              echo "process_ended=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            
             sleep 1
             counter=$((counter + 1))
           done
           
-          echo "[Wait] OpenVPN 守护进程已结束。"
-          sudo rm -f "${OPENVPN_DAEMON_PID_FILE}" || true
-          exit 0
+          echo "[Wait] 已等待10分钟，准备触发下一次循环..."
+          echo "process_ended=false" >> $GITHUB_OUTPUT
+          echo "daemon_pid=$DAEMON_PID" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: 触发下一次循环
+        if: steps.wait-vpn.outputs.process_ended != 'true'
+        run: |
+          echo "OpenVPN 守护进程仍在运行，正在触发下一次循环..."
+          
+          # 计算下一次迭代计数
+          NEXT_ITERATION=$((${{ github.event.inputs.iteration || 1 }} + 1))
+          echo "下一次将是第 $NEXT_ITERATION 轮循环"
+          
+          # 获取守护进程PID
+          DAEMON_PID="${{ steps.wait-vpn.outputs.daemon_pid }}"
+          
+          # 触发相同工作流
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/ubuntu_openvpn.yml/dispatches \
+            -d "{\"ref\":\"${{ github.ref }}\", \"inputs\": {\"parent_run_id\": \"${{ github.run_id }}\", \"iteration\": \"$NEXT_ITERATION\", \"daemon_pid\": \"$DAEMON_PID\"}}"
+          
+          echo "已触发下一轮循环 (#$NEXT_ITERATION)"
         shell: bash
