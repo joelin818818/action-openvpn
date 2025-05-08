@@ -16,6 +16,11 @@ on:
         required: false
         default: ''
 
+# 添加权限设置，确保工作流可以触发其他工作流
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   run-on-ubuntu: # 作业名称
     runs-on: ubuntu-latest # 在最新的Ubuntu环境上运行
@@ -189,12 +194,49 @@ jobs:
           # 获取守护进程PID
           DAEMON_PID="${{ steps.wait-vpn.outputs.daemon_pid }}"
           
+          # 准备触发参数
+          REPO="${{ github.repository }}"
+          REF="${{ github.ref }}"
+          
+          echo "正在触发仓库: $REPO, 分支: $REF 的下一次循环"
+          echo "传递参数: parent_run_id=${{ github.run_id }}, iteration=$NEXT_ITERATION, daemon_pid=$DAEMON_PID"
+          
           # 触发相同工作流
-          curl -X POST \
+          RESPONSE=$(curl -s -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/ubuntu_openvpn.yml/dispatches \
-            -d "{\"ref\":\"${{ github.ref }}\", \"inputs\": {\"parent_run_id\": \"${{ github.run_id }}\", \"iteration\": \"$NEXT_ITERATION\", \"daemon_pid\": \"$DAEMON_PID\"}}"
+            -H "Content-Type: application/json" \
+            https://api.github.com/repos/$REPO/actions/workflows/ubuntu_openvpn.yml/dispatches \
+            -d "{\"ref\":\"$REF\", \"inputs\": {\"parent_run_id\": \"${{ github.run_id }}\", \"iteration\": \"$NEXT_ITERATION\", \"daemon_pid\": \"$DAEMON_PID\"}}" \
+            -w "\n%{http_code}")
           
-          echo "已触发下一轮循环 (#$NEXT_ITERATION)"
+          # 分离响应正文和状态码
+          HTTP_BODY=$(echo "$RESPONSE" | head -n 1)
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n 1)
+          
+          echo "API响应状态码: $HTTP_STATUS"
+          if [ "$HTTP_BODY" != "" ]; then
+            echo "API响应内容: $HTTP_BODY"
+          fi
+          
+          if [ "$HTTP_STATUS" -eq 204 ]; then
+            echo "✅ 成功触发下一轮循环 (#$NEXT_ITERATION)"
+          else
+            echo "❌ 触发失败，状态码: $HTTP_STATUS"
+            echo "请检查工作流文件名称是否正确，以及GITHUB_TOKEN是否有足够权限"
+            
+            # 尝试使用备选方式保持OpenVPN运行
+            echo "尝试继续等待OpenVPN进程..."
+            # 再等待10分钟，然后再次尝试触发
+            sleep 600
+            
+            # 递归调用此步骤
+            echo "正在重新尝试触发..."
+            curl -s -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: application/json" \
+              https://api.github.com/repos/$REPO/actions/workflows/ubuntu_openvpn.yml/dispatches \
+              -d "{\"ref\":\"$REF\", \"inputs\": {\"parent_run_id\": \"${{ github.run_id }}\", \"iteration\": \"$NEXT_ITERATION\", \"daemon_pid\": \"$DAEMON_PID\"}}"
+          fi
         shell: bash
