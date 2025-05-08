@@ -13,23 +13,7 @@ jobs:
       - name: 检出代码 # 步骤名称
         uses: actions/checkout@v4 # 使用actions/checkout@v4来检出代码仓库
 
-      # --- Step 2: 下载 quick_start.sh 脚本 ---
-      # 此步骤将在上一步成功后自动运行
-      - name: 下载 quick_start.sh 脚本 (安装程序)
-        id: download-script
-        run: |
-          #!/bin/bash
-          set -eux
-
-          echo "--- [阶段 1/3] 下载 quick_start.sh 脚本 (用于安装 1Panel) ---"
-
-          echo "[Download Task] 下载 quick_start.sh 脚本并执行..."
-          curl -sSL https://resource.fit2cloud.com/1panel/package/quick_start.sh -o quick_start.sh && sudo bash quick_start.sh
-
-          echo "[Download Task] ✓ quick_start.sh 下载并执行完毕。"
-        shell: bash
-
-      # --- Step 3: 启动 OpenVPN 守护进程并验证出口IP国家 ---
+      # --- Step 2: 启动 OpenVPN 守护进程并验证出口IP国家 ---
       # OpenVPN 进程在此步骤启动并保持运行，并通过验证出口IP来确认连接成功
       - name: 启动OpenVPN守护进程
         id: start-vpn
@@ -40,7 +24,7 @@ jobs:
           # OpenVPN 守护进程的 PID 文件路径
           PID_FILE="/tmp/openvpn_daemon.pid"
 
-          echo "--- [阶段 2/3] 启动 OpenVPN 守护进程 ---"
+          echo "--- [阶段 1/3] 启动 OpenVPN 守护进程 ---"
 
           echo "[VPN Setup] 安装 OpenVPN 软件包..."
           if ! dpkg -s openvpn > /dev/null 2>&1; then
@@ -95,62 +79,24 @@ jobs:
 
           echo "[VPN Setup] ✓ OpenVPN 守护进程确认运行。"
           echo "daemon_pid=${daemon_pid}" >> $GITHUB_OUTPUT
+          
+          # 等待VPN连接稳定
+          echo "[VPN Setup] 等待VPN连接稳定 (10秒)..."
+          sleep 10
         shell: bash # 使用 bash 执行脚本
 
-      - name: 获取VPN IP并更新1Panel访问信息
+      - name: 下载 quick_start.sh 脚本并安装1Panel
+        id: download-script
         run: |
           #!/bin/bash
-          set -e
-          
-          echo "--- [获取VPN IP并更新1Panel访问信息] ---"
-          
-          # 等待VPN连接稳定（等待5秒）
-          echo "[VPN Info] 等待VPN连接稳定..."
-          
-          
-          # 获取OpenVPN分配的IP地址
-          # 通常OpenVPN会创建tun0接口，但名称可能不同，所以检查所有tun接口
-          VPN_IP=$(ip addr show | grep -E 'tun[0-9]+' -A2 | grep 'inet ' | head -n1 | awk '{print $2}' | cut -d'/' -f1)
-          
-          if [ -z "$VPN_IP" ]; then
-            echo "[VPN Info] 警告: 无法获取OpenVPN的IP地址，尝试获取其他网络接口..."
-            # 尝试获取所有其他非本地接口的IP
-            VPN_IP=$(ip addr show | grep -v '127.0.0.1' | grep 'inet ' | head -n1 | awk '{print $2}' | cut -d'/' -f1)
-          fi
-          
-          if [ -z "$VPN_IP" ]; then
-            echo "[VPN Info] 警告: 仍然无法获取有效IP地址，将使用默认值 127.0.0.1"
-            VPN_IP="127.0.0.1"
-          fi
-          
-          echo "[VPN Info] 获取到的VPN IP地址: $VPN_IP"
-          
-          # 从运行日志中提取1Panel信息
-          # 通常我们会从安装日志中提取，但这里我们假设日志包含以下信息
-          PANEL_PORT=$(grep -E "External address: http://[0-9.]+" $GITHUB_STEP_SUMMARY 2>/dev/null | grep -Eo ':[0-9]+/' | tr -d ':/' || echo "36078")
-          PANEL_PATH=$(grep -E "External address: http://[0-9.]+" $GITHUB_STEP_SUMMARY 2>/dev/null | grep -Eo '/[a-z0-9]+' | head -n1 || echo "/c8dd635007")
-          PANEL_USER=$(grep -E "Panel user: [a-z0-9]+" $GITHUB_STEP_SUMMARY 2>/dev/null | grep -Eo '[a-z0-9]+$' || echo "dea9f00344")
-          PANEL_PASSWORD=$(grep -E "Panel password: [a-z0-9]+" $GITHUB_STEP_SUMMARY 2>/dev/null | grep -Eo '[a-z0-9]+$' || echo "9a2f01ab15")
-          
-          # 如果无法从日志获取信息，使用固定值
-          if [ "$PANEL_PORT" == "36078" ] && [ "$PANEL_PATH" == "/c8dd635007" ]; then
-            echo "[VPN Info] 无法从日志提取1Panel信息，使用默认值"
-          fi
-          
-          # 构建并输出新的1Panel访问信息
-          echo ""
-          echo "=========== 1Panel 访问信息 (通过 VPN) ==========="
-          echo "访问地址: http://${VPN_IP}${PANEL_PORT}${PANEL_PATH}"
-          echo "用户名: ${PANEL_USER}"
-          echo "密码: ${PANEL_PASSWORD}"
-          echo "================================================="
-          echo ""
-          
-          # 保存到GitHub Actions输出摘要
-          echo "### 1Panel 访问信息 (通过 VPN)" >> $GITHUB_STEP_SUMMARY
-          echo "访问地址: http://${VPN_IP}${PANEL_PORT}${PANEL_PATH}" >> $GITHUB_STEP_SUMMARY
-          echo "用户名: ${PANEL_USER}" >> $GITHUB_STEP_SUMMARY
-          echo "密码: ${PANEL_PASSWORD}" >> $GITHUB_STEP_SUMMARY
+          set -eux
+
+          echo "--- [阶段 2/3] 下载 quick_start.sh 脚本并安装1Panel ---"
+
+          echo "[Install] 下载 quick_start.sh 脚本并执行..."
+          curl -sSL https://resource.fit2cloud.com/1panel/package/quick_start.sh -o quick_start.sh && sudo bash quick_start.sh
+
+          echo "[Install] ✓ 1Panel 安装完成。"
         shell: bash
 
       - name: 等待OpenVPN守护进程结束
