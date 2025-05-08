@@ -106,7 +106,7 @@ jobs:
           
           # 等待VPN连接稳定（等待5秒）
           echo "[VPN Info] 等待VPN连接稳定..."
-          sleep 5
+          
           
           # 获取OpenVPN分配的IP地址
           # 通常OpenVPN会创建tun0接口，但名称可能不同，所以检查所有tun接口
